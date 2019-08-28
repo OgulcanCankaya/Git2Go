@@ -1,12 +1,12 @@
 package main
 import (
-git "github.com/libgit2/git2go"
-"errors"
-"fmt"
-"log"
-"os"
-"os/exec"
-"time"
+	git "github.com/libgit2/git2go"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"time"
 )
 var cloneOpt = git.CloneOptions{
 	CheckoutOpts:         nil,
@@ -32,8 +32,6 @@ var signature = git.Signature{
 	Email: "ogulcan985@outlook.com",
 	When:  time.Now(),
 }
-
-
 
 /*func to take all repo directories*/
 func checkErr(err error){
@@ -105,8 +103,8 @@ func gitPull2 ( repo *git.Repository  ) error {
 	// If index has conflicts, read old tree into index and
 	// return an error.
 	if idx.HasConflicts() {
-		repo.ResetToCommit(localCommit, git.ResetHard, &git.CheckoutOpts{})
-		repo.StateCleanup()
+		_ = repo.ResetToCommit(localCommit, git.ResetHard, &git.CheckoutOpts{})
+		_ = repo.StateCleanup()
 		return errors.New("conflict")
 	}
 	// If everything looks fine, create a commit with the two parents
@@ -127,7 +125,7 @@ func gitPull2 ( repo *git.Repository  ) error {
 	if err != nil {
 		return err
 	}
-	repo.StateCleanup()
+	_ = repo.StateCleanup()
 	return nil
 }
 
@@ -338,6 +336,7 @@ func gitCommit (repo *git.Repository, message string, signature *git.Signature){
 	var path []string
 	pathAll := append(path,".")
 	log.Println(pathAll)
+
 	err = idx.AddAll(pathAll, git.IndexAddDefault, nil)
 	if err != nil {
 		log.Println(err)
@@ -348,6 +347,7 @@ func gitCommit (repo *git.Repository, message string, signature *git.Signature){
 	if err != nil {
 		panic(err)
 	}
+
 	/*added directory*/
 	/*trying to create commit*/
 	head, err := repo.Head()
@@ -377,26 +377,18 @@ func gitCommit (repo *git.Repository, message string, signature *git.Signature){
 	}
 }
 
-func runCom(cmdName string, commandArg []string, path string) { /* Try to execute the commands on every .git*/
-	fmt.Println("pwd output is:")
-	pwd := exec.Command("pwd")
-	pwd.Dir=path
-	pwd.Stdout = os .Stdout
-	pwd.Stderr = os.Stderr
-	_ = pwd.Run()
+func runCom(cmdName string, commandArg []string, path string) {
+	/* Try to execute the commands on every .git*/
 	fmt.Println("Command output is:")
+	cmd := exec.Command("ls")
 	if len(commandArg) > 1 {
-		cmd := exec.Command(cmdName,commandArg[1:]...)
-		cmd.Dir=path
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		_ = cmd.Run()
+		cmd = exec.Command(cmdName,commandArg[1:]...)
 	}
 	if len(commandArg) == 1 {
-		cmd := exec.Command(cmdName)
-		cmd.Dir=path
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		_ = cmd.Run()
+		cmd = exec.Command(cmdName)
 	}
-} /**needs maintenance*/
+	cmd.Dir=path
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	_ = cmd.Run()
+} /**needs maintenance i think*/

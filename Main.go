@@ -11,8 +11,6 @@ import (
 )
 
 func main() {
-
-
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("Choose option...\n1.Status\n2.Fetch\n3.Merge\n4.Pull\n5.Push\n6.Clone\n7.Commit\n8.Custom command")
 
