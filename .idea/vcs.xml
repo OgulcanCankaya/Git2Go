@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/hede" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/n" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/n1" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/n2" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/n3" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/n4" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/not" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/sa" vcs="Git" />
+  </component>
+</project>

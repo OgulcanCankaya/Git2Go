@@ -371,7 +371,7 @@ func gitCommit (repo *git.Repository, message string, signature *git.Signature){
 	if indexHadConflicts == true {
 		localCommit, err := repo.LookupCommit(commitId)
 		if err != nil {
-			log.Println("Fetch 11 - ", err)
+			log.Println(err)
 		}
 		commitId,err = repo.CreateCommit("HEAD", signature, signature, "Merge commit", tree, localCommit, headCommit)
 	}
