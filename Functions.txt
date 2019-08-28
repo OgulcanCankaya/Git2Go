@@ -274,6 +274,7 @@ func GitAddCommit(sig *git.Signature, repo *git.Repository, message string) erro
 		log.Println("LookupCommit - ", err)
 	}
 	// Create a new one on top
+
 	currentCommit, err := repo.CreateCommit("HEAD", sig, sig, message, tree, currentTip)
 	if err != nil {
 		log.Println("CreateCommit - ", err)

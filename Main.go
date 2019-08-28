@@ -12,24 +12,7 @@ import (
 	"time"
 )
 
-var cloneOpt = git.CloneOptions{
-	CheckoutOpts:         nil,
-	FetchOptions:         &git.FetchOptions{
 
-		RemoteCallbacks: git.RemoteCallbacks{
-			CredentialsCallback:          credentialsCallback,
-			CertificateCheckCallback:     certificateCheckCallback,
-		},
-
-		Prune:           0,
-		UpdateFetchhead: false,
-		DownloadTags:    0,
-		Headers:         nil,
-	},
-	Bare:                 false,
-	CheckoutBranch:       "",
-	RemoteCreateCallback: nil,
-}
 var signature = git.Signature{
 
 	Name:  "Ogulcan Cankaya",
@@ -44,92 +27,128 @@ func checkErr(err error){
 	}
 }
 
-func AddAll(repo git.Repository) error {
-	idx, err := repo.Index()
-	if err != nil {
-		return err
-	}
-	err = idx.AddAll([]string{}, git.IndexAddDefault, nil)
-	if err != nil {
-		return err
-	}
-	err = idx.Write()
-	return err
-}
 
 func gitPull2 ( repo *git.Repository  ) error {
+
+
+	// Locate remote
 	remote, err := repo.Remotes.Lookup("origin")
 	if err != nil {
 		return err
 	}
-	called := false
-	err = remote.Fetch([]string{}, &git.FetchOptions{
+
+	// Fetch changes from remote
+	if err := remote.Fetch([]string{}, &git.FetchOptions{
 		RemoteCallbacks: git.RemoteCallbacks{
-			CredentialsCallback: func(url string, username_from_url string, allowed_types git.CredType) (git.ErrorCode, *git.Cred) {
-				if called {
-					return git.ErrUser, nil
-				}
-				called = true
-				ret, cred := git.NewCredSshKey("git", "/home/ogulcan/.ssh/id_rsa.pub", "/home/ogulcan/.ssh/id_rsa", "")
-				return git.ErrorCode(ret), &cred
-			},
-		},
-	}, "")
+			CredentialsCallback:          credentialsCallback,
+			CertificateCheckCallback:     certificateCheckCallback,
+		},}, ""); err != nil {
+		return err
+	}
+
+	// Get remote master
+	remoteBranch, err := repo.References.Lookup("refs/remotes/origin/"+"master")
 	if err != nil {
 		return err
 	}
-	remoteBranch, err := repo.References.Lookup("refs/remotes/" + "origin" + "/" + "master")
+
+	remoteBranchID := remoteBranch.Target()
+	// Get annotated commit
+	annotatedCommit, err := repo.AnnotatedCommitFromRef(remoteBranch)
 	if err != nil {
 		return err
 	}
-	mergeRemoteHead, err := repo.AnnotatedCommitFromRef(remoteBranch)
-	if err != nil {
-		return err
-	}
+
+	// Do the merge analysis
 	mergeHeads := make([]*git.AnnotatedCommit, 1)
-	mergeHeads[0] = mergeRemoteHead
-	if err = repo.Merge(mergeHeads, nil, nil); err != nil {
-		return err
-	}
-	// Check if the index has conflicts after the merge
-	idx, err := repo.Index()
+	mergeHeads[0] = annotatedCommit
+	analysis, _, err := repo.MergeAnalysis(mergeHeads)
 	if err != nil {
 		return err
 	}
-	currentBranch, err := repo.Head()
+
+	// Get repo head
+	head, err := repo.Head()
 	if err != nil {
 		return err
 	}
-	localCommit, err := repo.LookupCommit(currentBranch.Target())
-	if err != nil {
-		return err
-	}
-	// If index has conflicts, read old tree into index and
-	// return an error.
-	if idx.HasConflicts() {
-		repo.ResetToCommit(localCommit, git.ResetHard, &git.CheckoutOpts{})
+
+	if analysis & git.MergeAnalysisUpToDate != 0 {
+		return nil
+	}  else if analysis & git.MergeAnalysisNormal != 0 {
+		// Just merge changes
+		if err := repo.Merge([]*git.AnnotatedCommit{annotatedCommit}, nil, nil); err != nil {
+			return err
+		}
+		// Check for conflicts
+		index, err := repo.Index()
+		if err != nil {
+			return err
+		}
+
+		if index.HasConflicts() {
+			return errors.New("Conflicts encountered. Please resolve them.")
+		}
+
+		// Make the merge commit
+		sig, err := repo.DefaultSignature()
+		if err != nil {
+			return err
+		}
+
+		// Get Write Tree
+		treeId, err := index.WriteTree()
+		if err != nil {
+			return err
+		}
+
+		tree, err := repo.LookupTree(treeId)
+		if err != nil {
+			return err
+		}
+
+		localCommit, err := repo.LookupCommit(head.Target())
+		if err != nil {
+			return err
+		}
+
+		remoteCommit, err := repo.LookupCommit(remoteBranchID)
+		if err != nil {
+			return err
+		}
+
+		repo.CreateCommit("HEAD", sig, sig, "", tree, localCommit, remoteCommit)
+
+		// Clean up
 		repo.StateCleanup()
-		return errors.New("conflict")
+	} else if analysis & git.MergeAnalysisFastForward != 0 {
+		// Fast-forward changes
+		// Get remote tree
+		remoteTree, err := repo.LookupTree(remoteBranchID)
+		if err != nil {
+			return err
+		}
+
+		// Checkout
+		if err := repo.CheckoutTree(remoteTree, nil); err != nil {
+			return err
+		}
+
+		branchRef, err := repo.References.Lookup("refs/heads/"+"master")
+		if err != nil {
+			return err
+		}
+
+		// Point branch to the object
+		branchRef.SetTarget(remoteBranchID, "")
+		if _, err := head.SetTarget(remoteBranchID, ""); err != nil {
+			return err
+		}
+
+	} else {
+		return fmt.Errorf("Unexpected merge analysis result %d", analysis)
 	}
-	// If everything looks fine, create a commit with the two parents
-	treeID, err := idx.WriteTree()
-	if err != nil {
-		return err
-	}
-	tree, err := repo.LookupTree(treeID)
-	if err != nil {
-		return err
-	}
-	remoteCommit, err := repo.LookupCommit(remoteBranch.Target())
-	if err != nil {
-		return err
-	}
-	sig := &git.Signature{Name: "OgulcanCankaya", Email: "email", When: time.Now()}
-	_, err = repo.CreateCommit("HEAD", sig, sig, "merged", tree, localCommit, remoteCommit)
-	if err != nil {
-		return err
-	}
-	_ = repo.StateCleanup()
+
 	return nil
 }
 
@@ -141,51 +160,44 @@ func   gitPull( repo *git.Repository ) error  {
 			return err
 		}
 	}
-	branchName := "master"
-	if err := remote.Fetch([]string{}, &git.FetchOptions{}, ""); err != nil {
+
+	if err := remote.Fetch([]string{}, &git.FetchOptions{
+		RemoteCallbacks: git.RemoteCallbacks{
+			CredentialsCallback:          credentialsCallback,
+			CertificateCheckCallback:     certificateCheckCallback,
+		},}, ""); err != nil {
 		return err
 	}
-	// Merge
-	remoteRef, err := repo.References.Lookup("refs/remotes/origin/" + branchName)
+	remoteRef, err := repo.References.Lookup("refs/remotes/origin/" + "master")
 	if err != nil {
 		return err
 	}
+
 	mergeRemoteHead, err := repo.AnnotatedCommitFromRef(remoteRef)
 	if err != nil {
 		return err
 	}
+
 	mergeHeads := make([]*git.AnnotatedCommit, 1)
 	mergeHeads[0] = mergeRemoteHead
 	if err = repo.Merge(mergeHeads, nil, nil); err != nil {
 		return err
 	}
+
 	return nil
 }
 
 func gitFetch(repo *git.Repository)  {
-	err := repo.Remotes.AddFetch("master","+refs/heads/*:refs/remotes/origin/*")
-	checkErr(err)
+
+
 }
 
-func gitPush(repo *git.Repository) error {
+func gitPush(repo *git.Repository)  {
 	remote, err := repo.Remotes.Lookup("master")
 	if err != nil {
-		return err
+		checkErr(err)
 	}
-	called := false
-	err = remote.Push([]string{"refs/heads/" + "master"}, &git.PushOptions{
-		RemoteCallbacks: git.RemoteCallbacks{
-			CredentialsCallback: func(url string, username_from_url string, allowed_types git.CredType) (git.ErrorCode, *git.Cred) {
-				if called {
-					return git.ErrUser, nil
-				}
-				called = true
-				ret, cred := git.NewCredSshKey("git", "/home/ogulcan/.ssh/id_rsa.pub", "/home/ogulcan/.ssh/id_rsa", "")
-				return git.ErrorCode(ret), &cred
-			},
-		},
-	})
-	return err
+	err = remote.Push([]string{"refs/heads/" + "/origin"}, nil)
 }
 
 func gitPush2(repo *git.Repository) error {
@@ -201,7 +213,7 @@ func gitPush2(repo *git.Repository) error {
 					return git.ErrUser, nil
 				}
 				called = true
-				ret, cred := git.NewCredSshKey("git", "/home/ogulcan/.ssh/id_rsa.pub", "/home/ogulcan/.ssh/id_rsa", "")
+				ret, cred := git.NewCredSshKey("git", "/", "/home/ogulcan/.ssh/id_rsa", "")
 				return git.ErrorCode(ret), &cred
 			},
 		},
@@ -209,7 +221,7 @@ func gitPush2(repo *git.Repository) error {
 	return err
 }
 
-func gitstat(path string){
+func gitStat(path string){
 	cmd := exec.Command("git" , "status" , path)
 	cmd.Dir=path
 	cmd.Stdout = os.Stdout
@@ -226,8 +238,17 @@ func certificateCheckCallback(cert *git.Certificate, valid bool, hostname string
 	return 0
 }
 
-func gitClone( url string, path string, cloneOpt *git.CloneOptions){
-	repo, err := git.Clone(url, path, cloneOpt)
+func gitClone( url string, path string){
+	cloneOpt := git.CloneOptions{
+		FetchOptions:         &git.FetchOptions{
+			RemoteCallbacks: git.RemoteCallbacks{
+				CredentialsCallback:          credentialsCallback,
+				CertificateCheckCallback:     certificateCheckCallback,
+			},
+		},
+	}
+
+	repo, err := git.Clone(url, path, &cloneOpt)
 	fmt.Println(repo)
 	if err != nil {
 		fmt.Println("www.errors.com\n", err)
@@ -282,6 +303,7 @@ func GitAddCommit(sig *git.Signature, repo *git.Repository, message string) erro
 	if err != nil {
 		log.Println("CreateCommit - ", err)
 	}
+
 	//  If there were conflicts, do the merge commit
 	if indexHadConflicts == true {
 		localCommit, err := repo.LookupCommit(currentCommit)
@@ -304,7 +326,7 @@ func GitAddCommit(sig *git.Signature, repo *git.Repository, message string) erro
 func gitMerge(repo *git.Repository, signature *git.Signature) error {
 	/*commit  "merge operation" for double merge protection  */
 	/*ahead behind check ???*/
-	gitCommit(repo, "merged origin/master to master",signature)
+	_ = GitAddCommit(signature, repo, "merged origin/master to master")
 	sourceBranchName := "origin/master"
 	destinationBranchName := "master"
 	remote, err := repo.Remotes.Lookup("origin")
@@ -315,7 +337,12 @@ func gitMerge(repo *git.Repository, signature *git.Signature) error {
 			return err
 		}
 	}
-	if err := remote.Fetch([]string{}, &git.FetchOptions{}, ""); err != nil {
+	if err := remote.Fetch([]string{}, &git.FetchOptions{
+		RemoteCallbacks: git.RemoteCallbacks{
+			CredentialsCallback:          credentialsCallback,
+			CertificateCheckCallback:     certificateCheckCallback,
+		},
+	}, ""); err != nil {
 		return err
 	}
 	// Merge
@@ -410,7 +437,7 @@ func main() {
 			fmt.Println("Enter path of repo:")
 			path, _ := reader.ReadString('\n')
 			path = path[:len(path)-1]
-			gitstat(path)
+			gitStat(path)
 		}
 		if text == "2\n" {
 			println("Fetch Funct")
@@ -437,6 +464,12 @@ func main() {
 			repo, _ := git.OpenRepository(path)
 			err := gitPull2(repo)
 			if err != nil {
+				fmt.Println("we couldnt pull2 :| ")
+				log.Println(err)
+			}
+			fmt.Println("after pull2")
+			err = gitPull(repo)
+			if err != nil {
 				fmt.Println("we couldnt pull :| ")
 				log.Println(err)
 			}
@@ -449,18 +482,21 @@ func main() {
 			repo, err := git.OpenRepository(path)
 			checkErr(err)
 			gitPush(repo)
+			gitPush2(repo)
 		}
 		/*git clone*/
 		if text == "6\n" {
 			println("Clone Funct")
 			fmt.Println("Please enter the repo address details in the following format.")
-			fmt.Println("git@github.com:{username}/{repository-name}.git")
+			fmt.Println("{username}/{repository-name}.git")
 			url, _ := reader.ReadString('\n')
 			url=strings.TrimSuffix(url,"\n")
+			url = "ssh://git@github.com/"+url
 			fmt.Println("Please enter the path")
 			path, _ := reader.ReadString('\n')
-			path = path[:len(path)-1]
-			go gitClone(url, path,&cloneOpt)
+			path = strings.TrimSuffix( path,"\n")
+			go gitClone(url, path)
+
 		}
 		if text == "7\n" {
 			fmt.Println("Please enter the git repository path")
@@ -469,7 +505,7 @@ func main() {
 			repo, _ := git.OpenRepository(path)
 			fmt.Println("Please enter message to commit: ")
 			message, _ := reader.ReadString('\n')
-			message = strings.TrimSuffix(path, "\n")
+			message = strings.TrimSuffix(message, "\n")
 			fmt.Println("Commiting...")
 			//gitCommit (repo , message , &signature)
 			err := GitAddCommit(&signature, repo, message)
